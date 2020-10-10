@@ -1,5 +1,5 @@
 __author__ = 'Juan-Ignacio-Diez_Unai-Puelles'
-
+import csv
 from pymongo import MongoClient
 
 def getCityGeoJSON(address):
@@ -55,11 +55,15 @@ class Model:
     required_vars = []
     admissible_vars = []
     db = None
+    validated = False
 
     def __init__(self, **kwargs):
-        #TODO
-        pass #No olvidar eliminar esta linea una vez implementado
-
+        self.init_class(self)
+        self.check_vars(**kwargs)
+        if self.validated:
+            self.__dict__.update(kwargs)
+        else:
+            print("[ERROR] Las variables introducidas no coinciden con las variables del modelo")
 
     def save(self):
         #TODO
@@ -78,17 +82,37 @@ class Model:
         pass #No olvidar eliminar esta linea una vez implementado
 
     @classmethod
-    def init_class(cls, db, vars_path="model_name.vars"):
+    def init_class(cls, db, vars_path='cliente.vars'):
         """ Inicializa las variables de clase en la inicializacion del sistema.
         Argumentos:
             db (MongoClient) -- Conexion a la base de datos.
             vars_path (str) -- ruta al archivo con la definicion de variables
             del modelo.
         """
+        cls.read_model_vars(vars_path)
         #TODO
         # cls() es el puntero a la clase
         pass #No olvidar eliminar esta linea una vez implementado
 
+    @classmethod
+    def read_model_vars(cls, vars_path):
+        with open('model_vars/'+vars_path) as vars_file:
+            vars_reader = csv.reader(vars_file, delimiter=';')
+            for row in vars_reader:
+                if row[1] == 'required':
+                    cls.required_vars.append(row[0])
+                elif row[1] == 'admissible':
+                    cls.admissible_vars.append(row[0])
+
+    @classmethod
+    def check_vars(cls, **kwargs):
+        kwargs_keys = set(kwargs.keys())
+        # Verificamos si todas las variables de required_vars existen en el diccionario
+        if kwargs_keys.issuperset(cls.required_vars):
+            kwargs_keys = kwargs_keys - set(cls.required_vars) # Eliminamos las variables obligatorias ya varificadas
+            kwargs_keys = kwargs_keys - set(cls.admissible_vars) # Eliminamos las variables opcionales
+            if len(kwargs_keys) == 0: # Si queda alguna variable significa que no estaba delcarada en el fichero de configuracion del modelo
+                cls.validated = True
 
 # Q1: Listado de todas las compras de un cliente
 nombre = "Definir"
@@ -97,6 +121,7 @@ Q1 = []
 # Q2: etc...
 
 if __name__ == '__main__':
-    #TODO
-    pass #No olvidar eliminar esta linea una vez implementado
-
+    cliente1 = {"name": "Unai Puelles", "billing_address": "Juntas generales", "shipping_address": "pruebas"}
+    model = Model(**cliente1)
+    print(model.required_vars)
+    print(model.admissible_vars)
