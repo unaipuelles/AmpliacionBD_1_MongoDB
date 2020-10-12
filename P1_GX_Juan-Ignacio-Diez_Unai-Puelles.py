@@ -31,7 +31,7 @@ class ModelCursor:
         """
         #TODO
         pass #No olvidar eliminar esta linea una vez implementado
-    
+
     def next(self):
         """ Devuelve el siguiente documento en forma de modelo
         """
@@ -45,7 +45,7 @@ class ModelCursor:
         #TODO
         pass #No olvidar eliminar esta linea una vez implementado
 
-class Model:
+class MongoDBGenericModel:
     """ Prototipo de la clase modelo
         Copiar y pegar tantas veces como modelos se deseen crear (cambiando
         el nombre Model, por la entidad correspondiente), o bien crear tantas
@@ -54,6 +54,7 @@ class Model:
     """
     required_vars = []
     admissible_vars = []
+    updated_vars = []
     db = None
     validated = False
 
@@ -66,8 +67,13 @@ class Model:
             print("[ERROR] Las variables introducidas no coinciden con las variables del modelo")
 
     def save(self):
-        #TODO
-        pass #No olvidar eliminar esta linea una vez implementado
+        if self.validated:
+            if not ('_id' in self.__dict__):
+                data = self.__dict__
+                print(data)
+                self.db.insert_one(data)
+            else:
+                self.update()
 
     def update(self, **kwargs):
         #TODO
@@ -89,10 +95,9 @@ class Model:
             vars_path (str) -- ruta al archivo con la definicion de variables
             del modelo.
         """
+        client = MongoClient('192.168.1.100', 27017)
+        cls.db = client.store
         cls.read_model_vars(vars_path)
-        #TODO
-        # cls() es el puntero a la clase
-        pass #No olvidar eliminar esta linea una vez implementado
 
     @classmethod
     def read_model_vars(cls, vars_path):
@@ -114,6 +119,26 @@ class Model:
             if len(kwargs_keys) == 0: # Si queda alguna variable significa que no estaba delcarada en el fichero de configuracion del modelo
                 cls.validated = True
 
+
+class Cliente(MongoDBGenericModel):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.select_db_collection()
+
+    @classmethod
+    def select_db_collection(cls):
+        cls.db = cls.db.cliente
+
+
+class Producto(MongoDBGenericModel):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.select_db_collection()
+
+    @classmethod
+    def select_db_collection(cls):
+        cls.db = cls.db.producto
+
 # Q1: Listado de todas las compras de un cliente
 nombre = "Definir"
 Q1 = []
@@ -121,7 +146,10 @@ Q1 = []
 # Q2: etc...
 
 if __name__ == '__main__':
-    cliente1 = {"name": "Unai Puelles", "billing_address": "Juntas generales", "shipping_address": "pruebas"}
-    model = Model(**cliente1)
-    print(model.required_vars)
-    print(model.admissible_vars)
+    cliente1 = {"name": "Unai Puelles Lopez prueba 1", "billing_address": "Juntas generales", "shipping_address": "pruebas"}
+    cliente = Cliente(**cliente1)
+    cliente.save()
+
+    #client = MongoClient('192.168.1.100', 27017)
+    #db = client.store
+    #db = db.cliente.insert_one(cliente1)
