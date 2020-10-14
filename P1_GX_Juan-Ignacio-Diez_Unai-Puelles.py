@@ -70,14 +70,34 @@ class MongoDBGenericModel:
         if self.validated:
             if not ('_id' in self.__dict__):
                 data = self.__dict__
-                print(data)
+                #print(data)
                 self.db.insert_one(data)
             else:
                 self.update()
+                #print(self.__dict__.values())
 
     def update(self, **kwargs):
         #TODO
-        pass #No olvidar eliminar esta linea una vez implementado
+
+        datadata = self.db.store
+        filter = { 'name' : self.__dict__['name']}
+        newValues = {"$set": {'name': self.__dict__['name']}}
+
+        datadata.update_one(filter, newValues)
+
+        print("Cambiando valores.....")
+        update = datadata.find()
+        print(update)
+        for datadata in update:
+            print(datadata)
+
+
+
+
+
+
+
+        #pass #No olvidar eliminar esta linea una vez implementado
     
     @classmethod
     def query(cls, query):
@@ -95,7 +115,7 @@ class MongoDBGenericModel:
             vars_path (str) -- ruta al archivo con la definicion de variables
             del modelo.
         """
-        client = MongoClient('192.168.1.100', 27017)
+        client = MongoClient('localhost', 27017)
         cls.db = client.store
         cls.read_model_vars(vars_path)
 
@@ -146,9 +166,21 @@ Q1 = []
 # Q2: etc...
 
 if __name__ == '__main__':
-    cliente1 = {"name": "Unai Puelles Lopez prueba 1", "billing_address": "Juntas generales", "shipping_address": "pruebas"}
+    cliente1 = {"_id": "1", "name": "Unai Puelles Lopez prueba 1", "billing_address": "Juntas generales", "shipping_address": "pruebas", "payment_cards": "pruebas", "discharge_date": "pruebas",
+                "last_access_date": "pruebas"}
+
     cliente = Cliente(**cliente1)
     cliente.save()
+
+
+    print("Actualizo el nombre")
+
+    cliente1 = {"_id": "1", "name": "Pepe Diez los palotes", "billing_address": "Juntas generales", "shipping_address": "pruebas", "payment_cards": "pruebas", "discharge_date": "pruebas",
+                "last_access_date": "pruebas"}
+
+    cliente1.update()
+
+    #print(cliente1)
 
     #client = MongoClient('192.168.1.100', 27017)
     #db = client.store
