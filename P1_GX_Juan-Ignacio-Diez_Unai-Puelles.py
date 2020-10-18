@@ -30,20 +30,38 @@ class ModelCursor:
             command_cursor (CommandCursor) -- Cursor de pymongo
         """
         #TODO
-        pass #No olvidar eliminar esta linea una vez implementado
+        # this.atributo = atributo
+        self.model_class = model_class
+        self.command_cursor = command_cursor
+
+
+
+
+        #pass #No olvidar eliminar esta linea una vez implementado
 
     def next(self):
         """ Devuelve el siguiente documento en forma de modelo
         """
         #TODO
-        pass #No olvidar eliminar esta linea una vez implementado
+
+        diccionario = self.command_cursor.next()
+        return self.model_class(**diccionario)
+
+        print("next..")
+
+
+
+
+        #pass #No olvidar eliminar esta linea una vez implementado
 
     @property
     def alive(self):
         """True si existen más modelos por devolver, False en caso contrario
         """
         #TODO
-        pass #No olvidar eliminar esta linea una vez implementado
+        self.command_cursor.alive()
+
+        #pass #No olvidar eliminar esta linea una vez implementado
 
 class MongoDBGenericModel:
     """ Prototipo de la clase modelo
@@ -70,16 +88,17 @@ class MongoDBGenericModel:
         if self.validated:
             if not ('_id' in self.__dict__):
                 data = self.__dict__
-                #print(data)
+                print(data)
                 self.db.insert_one(data)
             else:
                 self.update()
-                #print(self.__dict__.values())
+                print(self.__dict__.values())
 
     def update(self, **kwargs):
         #TODO
+        # pass  # No olvidar eliminar esta linea una vez implementado
 
-        datadata = self.db.store
+       ''' datadata = self.db.store
         filter = { 'name' : self.__dict__['name']}
         newValues = {"$set": {'name': self.__dict__['name']}}
 
@@ -90,6 +109,7 @@ class MongoDBGenericModel:
         print(update)
         for datadata in update:
             print(datadata)
+        '''
 
 
 
@@ -97,7 +117,7 @@ class MongoDBGenericModel:
 
 
 
-        #pass #No olvidar eliminar esta linea una vez implementado
+
     
     @classmethod
     def query(cls, query):
@@ -105,7 +125,10 @@ class MongoDBGenericModel:
         """ 
         #TODO
         # cls() es el puntero a la clase
-        pass #No olvidar eliminar esta linea una vez implementado
+        command_cursor = cls.db.aggregate(query)
+        return ModelCursor(cls.__class__, command_cursor)
+
+        #pass #No olvidar eliminar esta linea una vez implementado
 
     @classmethod
     def init_class(cls, db, vars_path='cliente.vars'):
@@ -115,7 +138,7 @@ class MongoDBGenericModel:
             vars_path (str) -- ruta al archivo con la definicion de variables
             del modelo.
         """
-        client = MongoClient('localhost', 27017)
+        client = MongoClient('127.0.0.1', 27017)
         cls.db = client.store
         cls.read_model_vars(vars_path)
 
@@ -160,27 +183,27 @@ class Producto(MongoDBGenericModel):
         cls.db = cls.db.producto
 
 # Q1: Listado de todas las compras de un cliente
+
+
 nombre = "Definir"
 Q1 = []
+
+
 
 # Q2: etc...
 
 if __name__ == '__main__':
-    cliente1 = {"_id": "1", "name": "Unai Puelles Lopez prueba 1", "billing_address": "Juntas generales", "shipping_address": "pruebas", "payment_cards": "pruebas", "discharge_date": "pruebas",
+
+    cliente1 = {"name": "Unai Puelles Lopez prueba 1", "billing_address": "Juntas generales", "shipping_address": "pruebas", "payment_cards": "pruebas", "discharge_date": "pruebas",
                 "last_access_date": "pruebas"}
 
     cliente = Cliente(**cliente1)
     cliente.save()
 
 
-    print("Actualizo el nombre")
 
-    cliente1 = {"_id": "1", "name": "Pepe Diez los palotes", "billing_address": "Juntas generales", "shipping_address": "pruebas", "payment_cards": "pruebas", "discharge_date": "pruebas",
-                "last_access_date": "pruebas"}
 
-    cliente1.update()
 
-    #print(cliente1)
 
     #client = MongoClient('192.168.1.100', 27017)
     #db = client.store
