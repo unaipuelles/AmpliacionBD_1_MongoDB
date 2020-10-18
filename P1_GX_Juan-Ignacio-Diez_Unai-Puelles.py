@@ -34,20 +34,38 @@ class ModelCursor:
         """
         return self.command_cursos.alive()
         #TODO
-        pass #No olvidar eliminar esta linea una vez implementado
+        # this.atributo = atributo
+        self.model_class = model_class
+        self.command_cursor = command_cursor
+
+
+
+
+        #pass #No olvidar eliminar esta linea una vez implementado
 
     def next(self):
         """ Devuelve el siguiente documento en forma de modelo
         """
         #TODO
-        pass #No olvidar eliminar esta linea una vez implementado
+
+        diccionario = self.command_cursor.next()
+        return self.model_class(**diccionario)
+
+        print("next..")
+
+
+
+
+        #pass #No olvidar eliminar esta linea una vez implementado
 
     @property
     def alive(self):
         """True si existen más modelos por devolver, False en caso contrario
         """
         #TODO
-        pass #No olvidar eliminar esta linea una vez implementado
+        self.command_cursor.alive()
+
+        #pass #No olvidar eliminar esta linea una vez implementado
 
 
 class MongoDBGenericModel:
@@ -86,19 +104,22 @@ class MongoDBGenericModel:
                 self.db.update_one({
                     "_id": self.__dict__["_id"]
                 }, data_to_update)
-
+                
     def update(self, **kwargs):
         self.__dict__.update(kwargs)
         for key in kwargs.keys():
             self.updated_vars.append(key)
-    
+            
     @classmethod
     def query(cls, query):
         """ Devuelve un cursor de modelos        
         """ 
         #TODO
         # cls() es el puntero a la clase
-        pass #No olvidar eliminar esta linea una vez implementado
+        command_cursor = cls.db.aggregate(query)
+        return ModelCursor(cls.__class__, command_cursor)
+
+        #pass #No olvidar eliminar esta linea una vez implementado
 
     def set_geo_json_data(self):
         if len(self.geojson_vars) != 0:
@@ -113,7 +134,7 @@ class MongoDBGenericModel:
             vars_path (str) -- ruta al archivo con la definicion de variables
             del modelo.
         """
-        client = MongoClient('192.168.1.100', 27017)
+        client = MongoClient('127.0.0.1', 27017)
         cls.db = client.store
         cls.read_model_vars(vars_path)
 
@@ -161,8 +182,12 @@ class Producto(MongoDBGenericModel):
         cls.db = cls.db.producto
 
 # Q1: Listado de todas las compras de un cliente
+
+
 nombre = "Definir"
 Q1 = []
+
+
 
 # Q2: etc...
 
@@ -175,8 +200,11 @@ if __name__ == '__main__':
         "discharge_date": "pruebas",
         "last_access_date": "2020",
     }
+
     cliente = Cliente(**cliente1)
     updated_vars = {"name": "Unai Puelles Lopez prueba2", "pament_cards": "pruebas2"}
     cliente.update(**updated_vars)
     cliente.save()
+
     print(cliente)
+
