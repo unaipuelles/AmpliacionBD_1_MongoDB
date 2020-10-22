@@ -1,7 +1,6 @@
-__author__ = 'Juan-Ignacio-Diez_Unai-Puelles'
+__authors__ = 'Juan-Ignacio-Diez_Unai-Puelles'
 import csv
 from pymongo import MongoClient
-
 
 def getCityGeoJSON(address):
     """ Devuelve las coordenadas de una direcciion a partir de un str de la direccion
@@ -28,51 +27,31 @@ class ModelCursor:
     def __init__(self, model_class, command_cursor):
         """ Inicializa ModelCursor
         Argumentos:
-            model_class (class) -- Clase para crear los modelos del 
+            model_class (class) -- Clase para crear los modelos del
             documento que se itera.
             command_cursor (CommandCursor) -- Cursor de pymongo
         """
-        return self.command_cursos.alive()
-        #TODO
-        # this.atributo = atributo
         self.model_class = model_class
         self.command_cursor = command_cursor
-
-
-
-
-        #pass #No olvidar eliminar esta linea una vez implementado
 
     def next(self):
         """ Devuelve el siguiente documento en forma de modelo
         """
-        #TODO
-
-        diccionario = self.command_cursor.next()
-        return self.model_class(**diccionario)
-
-        print("next..")
-
-
-
-
-        #pass #No olvidar eliminar esta linea una vez implementado
+        dictionary = self.command_cursor.next()
+        return self.model_class(**dictionary)
 
     @property
     def alive(self):
         """True si existen más modelos por devolver, False en caso contrario
         """
-        #TODO
-        self.command_cursor.alive()
-
-        #pass #No olvidar eliminar esta linea una vez implementado
+        return self.command_cursor.alive()
 
 
 class MongoDBGenericModel:
     """ Prototipo de la clase modelo
         Copiar y pegar tantas veces como modelos se deseen crear (cambiando
         el nombre Model, por la entidad correspondiente), o bien crear tantas
-        clases como modelos se deseen que hereden de esta clase. Este segundo 
+        clases como modelos se deseen que hereden de esta clase. Este segundo
         metodo puede resultar mas compleja
     """
     required_vars = []
@@ -81,14 +60,23 @@ class MongoDBGenericModel:
     geojson_vars = []
     db = None
     validated = False
+    initialized = False
 
     def __init__(self, vars_path, **kwargs):
-        self.init_class(vars_path)
-        self.check_vars(**kwargs)
-        if self.validated:
-            self.__dict__.update(kwargs)
-        else:
-            print("[ERROR] Las variables introducidas no coinciden con las variables del modelo")
+        # Init class
+        if not self.initialized:
+            self.init_class(vars_path)
+
+        if len(kwargs) != 0:
+            self.check_vars(**kwargs)
+            if self.validated:
+                self.__dict__.clear()
+                self.__dict__.update(kwargs)
+            else:
+                if '_id' in kwargs:
+                    print("[ERROR] El objeto obtenido de base de datos no coincide con las variables de configuracion del modelo", self.__class__.__name__)
+                else:
+                    print("[ERROR] Las variables introducidas no coinciden con las variables del modelo")
 
     def save(self):
         if self.validated:
@@ -104,22 +92,26 @@ class MongoDBGenericModel:
                 self.db.update_one({
                     "_id": self.__dict__["_id"]
                 }, data_to_update)
-                
+
     def update(self, **kwargs):
-        self.__dict__.update(kwargs)
-        for key in kwargs.keys():
-            self.updated_vars.append(key)
-            
+        dictionary = self.__dict__
+        updated_vars_tmp = []
+        for key, value in kwargs.items():
+            updated_vars_tmp.append(key)
+            dictionary[key] = value
+        self.check_vars(**dictionary)
+        if self.validated:
+            self.__dict__.update(kwargs)
+            self.updated_vars = updated_vars_tmp
+        else:
+            print("[ERROR] No actualizado: Los datos introducidos en el modelo no estan validados")
+
     @classmethod
     def query(cls, query):
-        """ Devuelve un cursor de modelos        
-        """ 
-        #TODO
-        # cls() es el puntero a la clase
+        """ Devuelve un cursor de modelos
+        """
         command_cursor = cls.db.aggregate(query)
-        return ModelCursor(cls.__class__, command_cursor)
-
-        #pass #No olvidar eliminar esta linea una vez implementado
+        return ModelCursor(cls, command_cursor)
 
     def set_geo_json_data(self):
         if len(self.geojson_vars) != 0:
@@ -134,9 +126,10 @@ class MongoDBGenericModel:
             vars_path (str) -- ruta al archivo con la definicion de variables
             del modelo.
         """
-        client = MongoClient('127.0.0.1', 27017)
+        client = MongoClient('192.168.1.100', 27017)
         cls.db = client.store
         cls.read_model_vars(vars_path)
+        cls.initialized = True
 
     @classmethod
     def read_model_vars(cls, vars_path):
@@ -162,9 +155,9 @@ class MongoDBGenericModel:
                 cls.validated = True
 
 
-class Cliente(MongoDBGenericModel):
+class Client(MongoDBGenericModel):
     def __init__(self, **kwargs):
-        super().__init__('cliente.vars', **kwargs)
+        super().__init__('client.vars', **kwargs)
         self.select_db_collection()
 
     @classmethod
@@ -172,9 +165,29 @@ class Cliente(MongoDBGenericModel):
         cls.db = cls.db.cliente
 
 
-class Producto(MongoDBGenericModel):
+class Product(MongoDBGenericModel):
     def __init__(self, **kwargs):
-        super().__init__('producto.vars', **kwargs)
+        super().__init__('product.vars', **kwargs)
+        self.select_db_collection()
+
+    @classmethod
+    def select_db_collection(cls):
+        cls.db = cls.db.producto
+
+
+class Provider(MongoDBGenericModel):
+    def __init__(self, **kwargs):
+        super().__init__('provider.vars', **kwargs)
+        self.select_db_collection()
+
+    @classmethod
+    def select_db_collection(cls):
+        cls.db = cls.db.producto
+
+
+class Shopping(MongoDBGenericModel):
+    def __init__(self, **kwargs):
+        super().__init__('shopping.vars', **kwargs)
         self.select_db_collection()
 
     @classmethod
@@ -182,29 +195,28 @@ class Producto(MongoDBGenericModel):
         cls.db = cls.db.producto
 
 # Q1: Listado de todas las compras de un cliente
-
-
 nombre = "Definir"
 Q1 = []
-
-
 
 # Q2: etc...
 
 if __name__ == '__main__':
-    cliente1 = {
-        "_id": "1",
-        "name": "Unai Puelles Lopez prueba 1",
-        "billing_address": "Juntas generales 55 4C, Vitoria-Gasteiz",
-        "payment_cards": "pruebas",
-        "discharge_date": "pruebas",
-        "last_access_date": "2020",
-    }
+    #cliente1 = {
+    #    "name": "Unai Puelles Lopez prueba 1",
+    #    "billing_address": "Juntas generales 55 4C, Vitoria-Gasteiz",
+    #    "payment_cards": "pruebas",
+    #    "discharge_date": "pruebas",
+    #    "last_access_date": "2020",
+    #}
+    #cliente = Cliente(**cliente1)
+    #updated_vars = {"name": "Unai Puelles Lopez prueba2", "pament_cards": "pruebas2"}
+    #cliente.update(**updated_vars)
+    #cliente.save()
+    #print(cliente)
 
-    cliente = Cliente(**cliente1)
-    updated_vars = {"name": "Unai Puelles Lopez prueba2", "pament_cards": "pruebas2"}
-    cliente.update(**updated_vars)
-    cliente.save()
+    cliente = Client()
+    model_cursor = cliente.query([{'$match': {'name': "Unai Puelles Lopez prueba 1"}}])
 
-    print(cliente)
-
+    clientbd1 = print(model_cursor.next())
+    clientebd = model_cursor.next()
+    print(clientebd)
