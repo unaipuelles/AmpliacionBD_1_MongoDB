@@ -9,12 +9,23 @@ __authors__ = 'Juan-Ignacio-Diez_Unai-Puelles'
 Librerias necesarias para el programa
 """
 import csv
-from pymongo import MongoClient
 import datetime
+import redis
+import json
+import bson.objectid
+from pymongo import MongoClient
+from datetime import timedelta
 
 """
 Funcion que coge la direccion de la persona y lo transforma en coordenadas
 """
+
+
+def json_converter(o):
+    if isinstance(o, datetime.datetime):
+        return o.__str__()
+    if isinstance(o, bson.objectid.ObjectId):
+        return o.__str__()
 
 
 def getCityGeoJSON(address):
@@ -95,10 +106,12 @@ class MongoDBGenericModel:
         if self.validated:  # Comprobamos que los datos estan validados
             if not ('_id' in self.__dict__):  # Miramos si existe el id en el diccionario
                 # No existe en base de datos (insercion)
-                data = self.__dict__  # Guardamos el diccionario en una variable
                 self.__set_geo_json_data__()  # Generamos coordenadas para todas las variables geojson
-                self.__dict__["_id"] = self.db.insert_one(
-                    data)  # Guardamos los datos en base de datos y guardamos la id
+                json_data = json.dumps(self.__dict__, default=json_converter)
+                self.__dict__["_id"] = self.db.insert_one(self.__dict__)  # Guardamos los datos en base de datos y guardamos la id
+                # Guardamos los datos en cache (Redis)
+                self.redis.set(self.__dict__['_id'].inserted_id.__str__(), json_data)
+                self.redis.expire(self.__dict__['_id'].inserted_id.__str__(), timedelta(hours=24))
             else:
                 # Existe en base de datos (actualizacion)
                 data_to_update = dict()
@@ -106,18 +119,22 @@ class MongoDBGenericModel:
                 for keys in self.updated_vars:  # Recorremos las variables a actualizar
                     data_to_update[keys] = self.__dict__[
                         keys]  # Gardamos en el diccionario clave y valor de la variable
-
+                del self.__dict__["updated_vars"]  # Eliminamos las updated vars
+                json_data = json.dumps(self.__dict__, default=json_converter)
+                self.__dict__["updated_vars"] = []  # Inicializamos a vacio las updated vars
                 # Actualizamos los datos mofificados en base de datos
                 self.db.update_one({
                     "_id": self._id
                 }, {
                     "$set": data_to_update
                 })
+                # Actualizamos los datos en cache (Redis)
+                self.redis.set(self._id.__str__(), json_data)
+                self.redis.expire(self._id.__str__(), timedelta(hours=24))
 
     """
         Actualizar los datos en el objeto
     """
-
     def update(self, **kwargs):
         dictionary = self.__dict__  # Guardamos el diccionario en un diccionario temporal
         updated_vars_tmp = []
@@ -136,7 +153,6 @@ class MongoDBGenericModel:
     """
         Generar geojson para las variables necesarias
     """
-
     def __set_geo_json_data__(self):
         if len(self.geojson_vars) != 0:  # Verificamos si hay variables configuradas como geojson
             for key in self.geojson_vars:  # Iteramos las variables configuradas
@@ -154,7 +170,6 @@ class MongoDBGenericModel:
     """
         Comprobar variables del diccionario con las variables configuradas para el objeto 
     """
-
     def __check_vars__(self, **kwargs):
         kwargs_keys = set(kwargs.keys())  # Convertimos las keys en un set para futuras operaciones
         # Verificamos si todas las variables de required_vars existen en el diccionario
@@ -168,7 +183,6 @@ class MongoDBGenericModel:
     """
         Consultas a base de datos
     """
-
     @classmethod
     def query(cls, query):
         """ Devuelve un cursor de modelos
@@ -177,11 +191,30 @@ class MongoDBGenericModel:
         return ModelCursor(cls, command_cursor)  # Retornamos un cursor especifico del modelo
 
     """
+        Consultas a base de datos
+    """
+    @classmethod
+    def find_one(cls, id_query):
+        """ Devuelve un cursor de modelos
+        """
+        # Mirar si tenemos el objeto en cache de Redis
+        data_found = cls.redis.get(id_query)
+
+        # Si no encontramos los datos en cache buscamos en mongoDB
+        if data_found is None:
+            data_found = cls.db.find_one({
+                "_id": id_query
+            })  # Realizar la consulta aggregate a base de datos y guardar el cursor
+        else:
+            print("Objeto recogido de cache")
+            data_found = json.loads(data_found)  # Convertir datos de cache que estan en json a un diccionario
+        return cls(**data_found)  # Retornamos un objeto de la clase
+
+    """
         Inicializar las variables de la clase
     """
-
     @classmethod
-    def init_class(cls, db, vars_path):
+    def init_class(cls, db, redis_db, vars_path):
         """ Inicializa las variables de clase en la inicializacion del sistema.
         Argumentos:
             vars_path (str) -- ruta al archivo con la definicion de variables
@@ -192,13 +225,13 @@ class MongoDBGenericModel:
         cls.updated_vars = []
         cls.geojson_vars = []
         cls.db = db
+        cls.redis = redis_db
         cls.validated = False
         cls.__read_model_vars__(vars_path)  # Cargar variables del modelo
 
     """
         Leer fichero de configuracion de las variables del modelo
     """
-
     @classmethod
     def __read_model_vars__(cls, vars_path):
         with open('model_vars/' + vars_path) as vars_file:  # Abrimos el fichero
@@ -235,139 +268,6 @@ class Shopping(MongoDBGenericModel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-
-# Q1: Listado de todas las compras de un cliente
-client_name_Q1 = "Aitor Sancho Martínez"
-Q1 = [{
-    "$match": {"client.name": client_name_Q1}
-}
-]
-
-# Q2: Listado de todos los proveedores para un producto
-product_name_Q2 = "The last of us 2"
-Q2 = [{
-    "$match": {"name": product_name_Q2}
-},
-    {"$group": {"_id": "$providers.name"}}
-]
-
-# Q3: Listado de todos los productos diferentes comprados por un cliente
-client_name_Q3 = "Aitor Sancho Martínez"
-# db.product.aggregate(Q3)
-Q3 = [
-    {
-        '$match': {"client.name": client_name_Q3}
-    },
-    {
-        '$group': {
-            '_id': '$client._id',
-            'products': {'$push': '$products.name'}
-        }
-    }
-]
-
-# Q4: Calcular  el  peso  y  volumen  total  de  los  productos comprados  por  un  cliente  un  día determinado
-client_name_Q4 = "Aitor Sancho Martínez"
-date_from = datetime.datetime(2020, 10, 23, 0, 0, 0)
-date_to = datetime.datetime(2020, 10, 28, 0, 0, 0)
-Q4 = [
-    {
-        "$match": {
-            "client.name": client_name_Q4,
-            "date_of_purchase": {
-                "$gte": date_from,
-                "$lt": date_to
-            }
-        }
-    },
-    {"$unwind": "$products"},
-    {
-        "$lookup": {
-            "from": "product",
-            "localField": "products._id",
-            "foreignField": "_id",
-            "as": "product"
-        }},
-    {
-        "$project": {
-            "dimensions": {"$sum": "$product.dimensions"},
-            "weight": {"$sum": "$product.weight"}
-        }
-    },
-    {"$group": {
-        "_id": "$client._id",
-        "dimensionsTotal": {"$sum": "$dimensions"},
-        "weightTotal": {"$sum": "$weight"},
-    }}
-]
-
-# Q5: Calcular el número medio de envíos por mes y almacén
-Q5 = [
-    {"$unwind": "$products"},
-    {"$unwind": "$products.providers"},
-    {"$project": {
-        "month": {
-            "$month": "$date_of_purchase"
-        },
-        "almacen": "$products.providers.name"
-    }},
-    {"$group": {
-        "_id": ["$month", "$almacen"],
-        "count": {"$sum": 1}
-    }},
-    {"$group": {
-        "_id": {"$last": "$_id"},
-        "avg": {"$avg": "$count"}
-    }}
-]
-
-# Q6: Listado con los tres proveedores con más volumen de facturación. Mostrar proveedor y volumen de facturación
-Q6 = [
-    {
-        "$project": {"products.providers.name": 1}
-    },
-    {"$unwind": "$products"},
-    {
-        "$group": {
-            "_id": "$products.providers.name",
-            "count": {"$sum": 1}
-        }
-    },
-    {
-        "$sort": {"count": -1}
-    },
-    {"$limit": 3}
-]
-
-# Q7: Listado  de almacenescerca  de  unas  coordenadas  determinadas  (100km  de  distancia máxima) ordenadas por
-# orden de distancia
-coordinates = [40.4523607, -3.8050322]
-# Indexar primero las coordenadas db.provider.createIndex({"store_address.position.coordinates": "2dsphere"})
-# Recordar poner .sort({"store_address.position":1}) para ordenar por la direccion
-Q7 = {
-    "store_address.position":
-        {
-            "$near":
-                {
-                    "$geometry": {"type": "Point", "coordinates": coordinates},
-                    "$maxDistance": 100
-                }
-        }
-}
-
-# Q8: Listado  de compras  con  destino dentro  de  un  polígono  cuyos vérticesvienen  definidos por coordenadas
-polygon = [42.853353, -2.672246], [42.846887, -2.676387], [42.847674, -2.666173]
-# Indexar las coordenadas: db.shopping.ensureIndex({"client.shipping_adress.position":"2d"})
-# cursor = db['shopping'].find(Q8)
-# Google earth con el archivo kml para visualizar el poligono
-Q8 = {
-    "client.shipping_address.position":
-        {
-            "$within": {
-                "$polygon": polygon
-            }
-        }
-}
 
 """
     Inicializar datos por defecto en la base de datos
@@ -602,64 +502,41 @@ def initialize_db_data():
 if __name__ == '__main__':
     # Crear la conexion a base de datos
     mongoClient = MongoClient('192.168.1.100', 27017)
-    db = mongoClient.store
+    db = mongoClient.store2
+
+    # Crear conexion a base de datos Redis
+    redis_db = redis.Redis(host='192.168.0.200', port=6379, password=None)
 
     # Inicializar todas las clases con sus respectivos atributos y la coleccion de base de datos
-    Client().init_class(db['client'], 'client.vars')
-    Product().init_class(db['product'], 'product.vars')
-    Provider().init_class(db['provider'], 'provider.vars')
-    Shopping().init_class(db['shopping'], 'shopping.vars')
+    Client().init_class(db['client'], redis_db, 'client.vars')
+    Product().init_class(db['product'], redis_db, 'product.vars')
+    Provider().init_class(db['provider'], redis_db, 'provider.vars')
+    Shopping().init_class(db['shopping'], redis_db, 'shopping.vars')
 
     # Descomentar para insertar datos por defecto
-    # initialize_db_data()
+    #initialize_db_data()
 
+    clientCursor = Client.query([{'$match': {'name': "Juan Ignacio"}}])  # Realizamos la query en base de datos
+    # Miramos si se ha encontrado algun cliente
+    if clientCursor.alive:  # Bucle mientras se sigan encontrando documentos
+        client = clientCursor.next()  # Recogemos la siguiente Clase
+        print(client.name)
+        newName = {"name": "Juan Ignacio Diez"}
+        client.update(**newName)  # Actualizamos el nombre
+        client.save()  # Guardamos los nuevos datos en base de datos
+
+    cliente = Client.find_one("5fa3dc87cd7b240d1e0b6ef8")
+    if cliente is not None:
+        print("Encontrado: ", cliente.name)
+
+    """
     ## Modificar el nombre de un cliente
     clientCursor = Client.query([{'$match': {'name': "Aitor Sancho Martínez"}}])  # Realizamos la query en base de datos
     # Miramos si se ha encontrado algun cliente
     if clientCursor.alive:  # Bucle mientras se sigan encontrando documentos
         client = clientCursor.next()  # Recogemos la siguiente Clase
         print(client.name)
-        newName = {"name": "Aitor Sancho Martinez"}
+        newName = {"name": "Aitor Landa Arrue"}
         client.update(**newName)  # Actualizamos el nombre
         client.save()  # Guardamos los nuevos datos en base de datos
-
-    # Query 1
-    cursor = Shopping().query(Q1)
-    while cursor.alive:
-        shopping = cursor.next()
-        print("[Q1] Compra: ", shopping.date_of_purchase)
-
-    # Query 2
-    cursor = db['product'].aggregate(Q2)
-    while cursor.alive:
-        print("[Q2]", cursor.next())
-
-    # Query 3
-    cursor = db['shopping'].aggregate(Q3)
-    while cursor.alive:
-        print("[Q3]", cursor.next())
-
-    # Query 4
-    cursor = db['shopping'].aggregate(Q4)
-    while cursor.alive:
-        print("[Q4]", cursor.next())
-
-    # Query 5
-    cursor = db['shopping'].aggregate(Q5)
-    while cursor.alive:
-        print("[Q5]", cursor.next())
-
-    # Query 6
-    cursor = db['shopping'].aggregate(Q6)
-    while cursor.alive:
-        print("[Q6]", cursor.next())
-
-    # Query 7. Indexar primero: db.provider.createIndex({"store_address.position.coordinates": "2dsphere"})
-    cursor = db['provider'].find(Q7).sort([("store_address.position",1)])
-    while cursor.alive:
-        print("[Q7]", cursor.next())
-
-    # Query 8. Indexar primero: db.shopping.ensureIndex({"client.shipping_adress.position":"2d"})
-    cursor = db['shopping'].find(Q8)
-    while cursor.alive:
-        print("[Q8]", cursor.next())
+    """
