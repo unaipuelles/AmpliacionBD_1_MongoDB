@@ -15,6 +15,8 @@ import json
 import bson.objectid
 from pymongo import MongoClient
 from datetime import timedelta
+import threading
+import time
 
 """
 Funcion que coge la direccion de la persona y lo transforma en coordenadas
@@ -26,6 +28,27 @@ def json_converter(o):
         return o.__str__()
     if isinstance(o, bson.objectid.ObjectId):
         return o.__str__()
+
+
+def wait_for_shopping_package(id, db, timeout):
+    shopping = "-1"
+    print("[THREAD ID=", id, "] Creado")
+    while shopping is not None:
+        print("[THREAD ID=", id, "] Esperando para empaquetar compra...")
+        shopping = db.blpop("shopping-package", timeout=timeout)
+        if shopping:
+            shopping = shopping[1]
+            print("[THREAD ID=", id, "] Compra recogida")
+            child = threading.Thread(target=wait_for_shopping_package, args=(id + 1, db, 60,))
+            child.start()
+            time.sleep(1)
+            # Empaquetamos
+            print("[THREAD ID=", id, "] Empaquetando compra:", shopping)
+            time.sleep(60)
+            print("[THREAD ID=", id, "] Empaquetado terminado.")
+        else:
+            print("[THREAD ID=", id, "] Timeout 60s. Compra no encontrada")
+    print("[THREAD ID=", id, "] Thread terminado")
 
 
 def getCityGeoJSON(address):
@@ -516,6 +539,9 @@ if __name__ == '__main__':
     # Descomentar para insertar datos por defecto
     #initialize_db_data()
 
+    child = threading.Thread(target=wait_for_shopping_package, args=(1, redis_db, 60,))
+    child.start()
+    """
     clientCursor = Client.query([{'$match': {'name': "Juan Ignacio"}}])  # Realizamos la query en base de datos
     # Miramos si se ha encontrado algun cliente
     if clientCursor.alive:  # Bucle mientras se sigan encontrando documentos
@@ -529,7 +555,7 @@ if __name__ == '__main__':
     if cliente is not None:
         print("Encontrado: ", cliente.name)
 
-    """
+    
     ## Modificar el nombre de un cliente
     clientCursor = Client.query([{'$match': {'name': "Aitor Sancho Martínez"}}])  # Realizamos la query en base de datos
     # Miramos si se ha encontrado algun cliente
