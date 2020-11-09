@@ -1,6 +1,6 @@
 """
 #################################################
-############ PROYECTO 1: MONGO DB ###############
+############ PROYECTO 2: REDIS ##################
 #################################################
 """
 __authors__ = 'Juan-Ignacio-Diez_Unai-Puelles'
@@ -14,41 +14,49 @@ import redis
 import json
 import bson.objectid
 from pymongo import MongoClient
+from pymongo import results
 from datetime import timedelta
 import threading
 import time
 
 """
-Funcion que coge la direccion de la persona y lo transforma en coordenadas
+    Funcion que nos transforma los objetos de python en string para introducrilos en redis
 """
-
-
 def json_converter(o):
     if isinstance(o, datetime.datetime):
         return o.__str__()
+    if isinstance(o, results.InsertOneResult):
+        return o.inserted_id.__str__()
     if isinstance(o, bson.objectid.ObjectId):
         return o.__str__()
 
 
+"""
+    Funcion thread para la espera de empaquetar compras
+"""
 def wait_for_shopping_package(id, db, timeout):
     shopping = "-1"
     print("[THREAD ID=", id, "] Creado")
-    while shopping is not None:
+    while shopping is not None:  # Bucle que servira para volver a quedarse escuchando en la lista de compras a empaquetar
         print("[THREAD ID=", id, "] Esperando para empaquetar compra...")
-        shopping = db.blpop("shopping-package", timeout=timeout)
-        if shopping:
-            shopping = shopping[1]
+        shopping = db.blpop("shopping-package", timeout=timeout)  # A la espera de que inserten una compra en la lista
+        if shopping:  # Si se ha encontrado compra
+            shopping = Shopping(**json.loads(shopping[1]))  # Convertimos la compra en un objeto
             print("[THREAD ID=", id, "] Compra recogida")
-            child = threading.Thread(target=wait_for_shopping_package, args=(id + 1, db, 60,))
-            child.start()
-            time.sleep(1)
-            # Empaquetamos
-            print("[THREAD ID=", id, "] Empaquetando compra:", shopping)
-            time.sleep(60)
+            child = threading.Thread(target=wait_for_shopping_package, args=(id + 1, db, 60,))  # Creamos un hijo para seguir escuchando
+            child.start()  # Ejecutamos el thread hijo
+            time.sleep(1)  # Ponemos el sleep para que los printf del thread principal no se pise con los hijos
+            print("[THREAD ID=", id, "] Empaquetando compra:", shopping._id)
+            shopping_package(shopping)  # Empaquetamos
             print("[THREAD ID=", id, "] Empaquetado terminado.")
         else:
             print("[THREAD ID=", id, "] Timeout 60s. Compra no encontrada")
     print("[THREAD ID=", id, "] Thread terminado")
+
+
+def shopping_package(shopping):
+    print("##### Lanzado proceso de empaquetacion ##### ID=", shopping._id)
+    time.sleep(60)
 
 
 def getCityGeoJSON(address):
@@ -107,7 +115,6 @@ class MongoDBGenericModel:
     """
         Constructor de la clase
     """
-
     def __init__(self, **kwargs):
         if len(kwargs) != 0:  # Comprobamos que el diccionario no está vacia
             self.__check_vars__(**kwargs)  # Valida el diccionario con el fichero de la configuración de la clase
@@ -124,17 +131,20 @@ class MongoDBGenericModel:
     """
         Guardar los datos en la base de datos 
     """
-
     def save(self):
         if self.validated:  # Comprobamos que los datos estan validados
             if not ('_id' in self.__dict__):  # Miramos si existe el id en el diccionario
                 # No existe en base de datos (insercion)
                 self.__set_geo_json_data__()  # Generamos coordenadas para todas las variables geojson
                 json_data = json.dumps(self.__dict__, default=json_converter)
-                self.__dict__["_id"] = self.db.insert_one(self.__dict__)  # Guardamos los datos en base de datos y guardamos la id
+                self.__dict__["_id"] = self.db.insert_one(
+                    self.__dict__)  # Guardamos los datos en base de datos y guardamos la id
                 # Guardamos los datos en cache (Redis)
                 self.redis.set(self.__dict__['_id'].inserted_id.__str__(), json_data)
-                self.redis.expire(self.__dict__['_id'].inserted_id.__str__(), timedelta(hours=24))
+                self.redis.expire(self.__dict__['_id'].inserted_id.__str__(), timedelta(hours=24))  # Establecemos expire
+                if self.__class__.__name__ == "Shopping":  # Si es una compra
+                    json_data_with_id = json.dumps(self.__dict__, default=json_converter)  # Generamos los datos con id
+                    self.redis.rpush("shopping-package", json_data_with_id)  # Guardamos la compra en la cola de empaquetamiento
             else:
                 # Existe en base de datos (actualizacion)
                 data_to_update = dict()
@@ -214,7 +224,7 @@ class MongoDBGenericModel:
         return ModelCursor(cls, command_cursor)  # Retornamos un cursor especifico del modelo
 
     """
-        Consultas a base de datos
+        Buscar por id en base de datos (con cache)
     """
     @classmethod
     def find_one(cls, id_query):
@@ -522,13 +532,19 @@ def initialize_db_data():
     shopping3.save()
 
 
-if __name__ == '__main__':
-    # Crear la conexion a base de datos
+"""
+    Inicializar base de datos, clases y empaquetador
+"""
+def init_app():
+    # Crear la conexion a base de datos mongoDB
     mongoClient = MongoClient('192.168.1.100', 27017)
-    db = mongoClient.store2
+    db = mongoClient.store
 
     # Crear conexion a base de datos Redis
     redis_db = redis.Redis(host='192.168.0.200', port=6379, password=None)
+    # Config de bd:
+    # config set maxmemory 150mb
+    # config set maxmemory-policy volatile-lru
 
     # Inicializar todas las clases con sus respectivos atributos y la coleccion de base de datos
     Client().init_class(db['client'], redis_db, 'client.vars')
@@ -536,12 +552,19 @@ if __name__ == '__main__':
     Provider().init_class(db['provider'], redis_db, 'provider.vars')
     Shopping().init_class(db['shopping'], redis_db, 'shopping.vars')
 
-    # Descomentar para insertar datos por defecto
-    #initialize_db_data()
+    # Inicializar thread principal para empaquetar nuevas compras
+    shopping_packager = threading.Thread(target=wait_for_shopping_package, args=(1, redis_db, None,))
+    shopping_packager.start()
 
-    child = threading.Thread(target=wait_for_shopping_package, args=(1, redis_db, 60,))
-    child.start()
-    """
+
+if __name__ == '__main__':
+    init_app()
+
+    # Descomentar para insertar datos por defecto
+    initialize_db_data()
+
+    # Para probar la actualizacion y la busqueda por bd y cache
+    """"
     clientCursor = Client.query([{'$match': {'name': "Juan Ignacio"}}])  # Realizamos la query en base de datos
     # Miramos si se ha encontrado algun cliente
     if clientCursor.alive:  # Bucle mientras se sigan encontrando documentos
@@ -554,15 +577,4 @@ if __name__ == '__main__':
     cliente = Client.find_one("5fa3dc87cd7b240d1e0b6ef8")
     if cliente is not None:
         print("Encontrado: ", cliente.name)
-
-    
-    ## Modificar el nombre de un cliente
-    clientCursor = Client.query([{'$match': {'name': "Aitor Sancho Martínez"}}])  # Realizamos la query en base de datos
-    # Miramos si se ha encontrado algun cliente
-    if clientCursor.alive:  # Bucle mientras se sigan encontrando documentos
-        client = clientCursor.next()  # Recogemos la siguiente Clase
-        print(client.name)
-        newName = {"name": "Aitor Landa Arrue"}
-        client.update(**newName)  # Actualizamos el nombre
-        client.save()  # Guardamos los nuevos datos en base de datos
     """
